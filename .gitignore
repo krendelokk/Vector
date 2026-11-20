@@ -1,0 +1,7 @@
+.env
+certs/
+certbot-www/
+node_modules/
+.demo-db
+.demo-db-seeded
+.demo-db.log

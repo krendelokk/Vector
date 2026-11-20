@@ -1,0 +1,62 @@
+# Антикорупційний вебпортал: postgres + backend (NestJS) + frontend (nginx з TLS)
+# Запуск: скопіюйте .env.example у .env, заповніть секрети, покладіть сертифікати в ./certs,
+# потім: docker compose up -d --build
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: portal
+      POSTGRES_USER: portal
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Задайте POSTGRES_PASSWORD у .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U portal -d portal"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    # Порт БД назовні не відкривається
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://portal:${POSTGRES_PASSWORD}@postgres:5432/portal
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?Задайте JWT_ACCESS_SECRET у .env}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?Задайте JWT_REFRESH_SECRET у .env}
+      JWT_ACCESS_TTL: 15m
+      JWT_REFRESH_TTL_DAYS: ${JWT_REFRESH_TTL_DAYS:-7}
+      COOKIE_SECURE: "true"
+      NODE_ENV: production
+      PORT: 3000
+      UPLOAD_DIR: /app/uploads
+      MAX_UPLOAD_MB: 20
+      MIN_RESPONDENTS_TO_PUBLISH: ${MIN_RESPONDENTS_TO_PUBLISH:-5}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_MODE: ${TELEGRAM_MODE:-polling}
+      TELEGRAM_WEBHOOK_URL: ${TELEGRAM_WEBHOOK_URL:-}
+      TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:-}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+    volumes:
+      - uploads:/app/uploads
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./certs:/etc/nginx/certs:ro
+      - ./certbot-www:/var/www/certbot:ro
+
+volumes:
+  pgdata:
+  uploads:

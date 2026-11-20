@@ -1,0 +1,266 @@
+// Антикорупційний вебпортал університету: схема БД
+// Prisma 7 (prisma-client generator + driver adapter @prisma/adapter-pg)
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+  runtime      = "nodejs"
+  importFileExtension = "js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------- Довідники та користувачі ----------
+
+enum Role {
+  ADMIN // технічний адміністратор: користувачі, підрозділи, аудит
+  COMPLIANCE_OFFICER // антикорупційний уповноважений
+  RECTORATE // ректор і проректори
+  INSTITUTE_DIRECTOR // директор інституту чи підрозділу
+  RESPONSIBLE_PERSON // відповідальна особа на місцях
+}
+
+model Department {
+  id        String    @id @default(uuid())
+  name      String    @unique
+  createdAt DateTime  @default(now())
+  users     User[]
+  anpItems  ANPItem[]
+}
+
+model User {
+  id               String     @id @default(uuid())
+  email            String     @unique
+  passwordHash     String
+  fullName         String
+  role             Role
+  departmentId     String?
+  department       Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  isActive         Boolean    @default(true)
+  refreshTokenHash String?
+  telegramChatId   String?    @unique
+  telegramLinkCode String?    @unique
+  telegramLinkExp  DateTime?
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+
+  responsibleItems ANPItem[]             @relation("ResponsibleItems")
+  reviewedItems    ANPItem[]             @relation("ReviewedItems")
+  surveyImports    SurveyImport[]
+  consultations    ConsultationRequest[] @relation("ConsultationAuthor")
+  answeredConsults ConsultationRequest[] @relation("ConsultationAnswerer")
+  notifications    Notification[]
+
+  @@index([role])
+  @@index([departmentId])
+}
+
+// ---------- Модуль 1: Контроль АНП ----------
+
+enum ANPStatus {
+  PENDING
+  SUBMITTED
+  APPROVED
+  REJECTED
+  OVERDUE
+}
+
+model ANPItem {
+  id             String     @id @default(uuid())
+  title          String
+  description    String?
+  deadline       DateTime
+  departmentId   String
+  department     Department @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  responsibleId  String
+  responsible    User       @relation("ResponsibleItems", fields: [responsibleId], references: [id], onDelete: Restrict)
+  status         ANPStatus  @default(PENDING)
+  reportText     String?
+  attachmentUrl  String? // ключ файлу у сховищі, не публічний URL
+  attachmentName String?
+  submittedAt    DateTime?
+  reviewedById   String?
+  reviewedBy     User?      @relation("ReviewedItems", fields: [reviewedById], references: [id], onDelete: SetNull)
+  reviewComment  String?
+  reviewedAt     DateTime?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  @@index([departmentId])
+  @@index([responsibleId])
+  @@index([status])
+  @@index([deadline])
+}
+
+// ---------- Модуль 2: Integrity Index ----------
+
+enum UploadChannel {
+  WEB
+  TELEGRAM
+}
+
+model SurveyImport {
+  id               String        @id @default(uuid())
+  uploadedById     String
+  uploadedBy       User          @relation(fields: [uploadedById], references: [id], onDelete: Restrict)
+  periodLabel      String
+  rawFileUrl       String // ключ сирого файлу, доступ лише COMPLIANCE_OFFICER
+  rawFileName      String
+  channel          UploadChannel @default(WEB)
+  respondentsCount Int
+  integrityIndex   Float
+  riskAreas        Json // [{ area, index, questions, answers }]
+  formulaVersion   String
+  published        Boolean       @default(false)
+  publishedAt      DateTime?
+  createdAt        DateTime      @default(now())
+
+  @@index([published])
+}
+
+// ---------- Модуль 3: База знань ----------
+
+enum KnowledgeCategory {
+  COURSE
+  MEMO
+  TEMPLATE
+  REGULATION
+}
+
+model KnowledgeItem {
+  id          String            @id @default(uuid())
+  category    KnowledgeCategory
+  title       String
+  description String?
+  url         String?
+  fileUrl     String?
+  fileName    String?
+  createdAt   DateTime          @default(now())
+
+  @@index([category])
+}
+
+// ---------- Модуль 4: Реєстр ризиків ----------
+
+enum RiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+model RiskRegistryItem {
+  id          String    @id @default(uuid())
+  area        String
+  description String
+  riskLevel   RiskLevel
+  mitigation  String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([riskLevel])
+}
+
+// ---------- Модуль 5: Календар ----------
+
+enum CalendarEventType {
+  DEADLINE
+  TRAINING
+  DECLARATION
+}
+
+model CalendarEvent {
+  id          String            @id @default(uuid())
+  title       String
+  description String?
+  date        DateTime
+  type        CalendarEventType
+  createdAt   DateTime          @default(now())
+
+  @@index([date])
+}
+
+// ---------- Модуль 6: Скринька довіри, FAQ, консультації ----------
+
+enum TrustBoxStatus {
+  NEW
+  IN_REVIEW
+  CLOSED
+}
+
+// Навмисно немає полів userId, IP, user-agent: анонімність забезпечується на рівні схеми.
+model TrustBoxMessage {
+  id             String         @id @default(uuid())
+  isAnonymous    Boolean        @default(true)
+  contactInfo    String?
+  message        String
+  attachmentUrl  String?
+  attachmentName String?
+  status         TrustBoxStatus @default(NEW)
+  officerNote    String?
+  createdAt      DateTime       @default(now())
+
+  @@index([status])
+}
+
+model FaqItem {
+  id        String   @id @default(uuid())
+  question  String
+  answer    String
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+}
+
+enum ConsultationStatus {
+  OPEN
+  ANSWERED
+}
+
+model ConsultationRequest {
+  id           String             @id @default(uuid())
+  userId       String
+  user         User               @relation("ConsultationAuthor", fields: [userId], references: [id], onDelete: Cascade)
+  question     String
+  answer       String?
+  answeredById String?
+  answeredBy   User?              @relation("ConsultationAnswerer", fields: [answeredById], references: [id], onDelete: SetNull)
+  answeredAt   DateTime?
+  status       ConsultationStatus @default(OPEN)
+  createdAt    DateTime           @default(now())
+
+  @@index([userId])
+  @@index([status])
+}
+
+// ---------- Внутрішні нагадування (без email/SMS/Telegram) ----------
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  body      String?
+  link      String?
+  isRead    Boolean  @default(false)
+  dedupeKey String   @unique
+  createdAt DateTime @default(now())
+
+  @@index([userId, isRead])
+}
+
+// ---------- Аудит ----------
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String?
+  action    String
+  entity    String
+  entityId  String?
+  details   Json?
+  createdAt DateTime @default(now())
+
+  @@index([entity, entityId])
+  @@index([createdAt])
+}

@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: portal
+          POSTGRES_USER: portal
+          POSTGRES_PASSWORD: portal
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U portal" --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      DATABASE_URL: postgresql://portal:portal@localhost:5432/portal
+      JWT_ACCESS_SECRET: ci-access-secret-ci-access-secret-0000000
+      JWT_REFRESH_SECRET: ci-refresh-secret-ci-refresh-secret-000000
+      UPLOAD_DIR: ./uploads
+      TZ: Europe/Kyiv
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - run: npm run lint
+      - run: npx prisma migrate deploy
+      - run: npm run seed
+      - run: npx jest --config jest.config.js src
+      - run: npm run test:e2e
+      - run: npm run build
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+
+  # Розгортання на сервер замовника. Увімкніть, коли буде відомий сервер:
+  # додайте секрети DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY і розкоментуйте job.
+  # deploy:
+  #   needs: [backend, frontend]
+  #   if: github.ref == 'refs/heads/main'
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: appleboy/ssh-action@v1
+  #       with:
+  #         host: ${{ secrets.DEPLOY_HOST }}
+  #         username: ${{ secrets.DEPLOY_USER }}
+  #         key: ${{ secrets.DEPLOY_SSH_KEY }}
+  #         script: |
+  #           cd /opt/anticorruption-portal
+  #           git pull
+  #           docker compose up -d --build

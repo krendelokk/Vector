@@ -1,0 +1,8 @@
+node_modules
+dist
+uploads
+.env
+src/generated
+.demo-db
+.demo-db-seeded
+.demo-db.log
