@@ -33,7 +33,7 @@
 
 ## Демонстрація
 
-**Відео:** (https://hack.bitec.com.ua/podannia/)
+**Відео:** (https://drive.google.com/file/d/1UjScVc837ORlxAoctEo64IEMt3itNDzV/view?usp=sharing)
 
 Сценарій відео: [docs/demo-script.md](docs/demo-script.md).
 
